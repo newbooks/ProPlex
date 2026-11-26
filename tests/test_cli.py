@@ -37,6 +37,13 @@ def test_placeholder_options_fail_without_claiming_success() -> None:
     assert "not implemented" in result.stderr
 
 
+def test_sequence_and_fasta_options_are_mutually_exclusive() -> None:
+    result = runner.invoke(app, ["--seq", "ACDE", "--fasta", "input.fasta"])
+
+    assert result.exit_code == 2
+    assert "--seq and --fasta are mutually exclusive" in result.stderr
+
+
 def test_public_scoring_function_is_importable_and_explicitly_unimplemented() -> None:
     try:
         score_sequence("ACDE")

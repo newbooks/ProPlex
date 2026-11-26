@@ -34,6 +34,9 @@ def main(
     if ctx.invoked_subcommand is None and seq is None and fasta is None and not verbose:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=0)
+    if seq is not None and fasta is not None:
+        typer.echo("Options --seq and --fasta are mutually exclusive.", err=True)
+        raise typer.Exit(code=2)
     if seq is not None or fasta is not None or verbose:
         typer.echo(
             "This CLI is a placeholder: sequence scoring and verbose output are not implemented yet.",
