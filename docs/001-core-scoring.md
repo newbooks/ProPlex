@@ -93,15 +93,17 @@ The installed top-level command is `proplex`, implemented with Typer using a
 root application that can support subcommands as the project grows. The initial
 interface decisions are:
 
-1. `proplex --seq SEQUENCE` scores a sequence supplied on the command line.
-2. `proplex --fasta PATH` scores sequence record(s) from a FASTA file.
-3. `proplex --help` and `proplex -h` show help. Invoking `proplex` with no
-   arguments also shows help by default.
+1. `proplex query --seq SEQUENCE` scores a sequence supplied on the command
+   line.
+2. `proplex query --fasta PATH` scores sequence record(s) from a FASTA file.
+3. `proplex --help` and `proplex -h` show root help. Invoking `proplex` with no
+   arguments also shows root help by default; `proplex query` shows query help.
 4. The CLI always saves complete sequence and residue-level results to JSON.
    `--output` / `-o` selects the path; otherwise FASTA writes beside the input
    as `<stem>.proplex.json` and `--seq` writes `proplex-results.json` in the
    current directory.
-5. Treat `--seq` and `--fasta` as mutually exclusive input modes.
+5. Treat `--seq` and `--fasta` as mutually exclusive input modes under `query`.
+   Keep the root command open for future subcommands such as `proplex root`.
 
 ## 7. Decisions still open
 
