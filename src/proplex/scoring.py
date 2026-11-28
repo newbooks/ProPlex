@@ -117,7 +117,7 @@ def parse_fasta(path: str | Path) -> list[tuple[str, str]]:
     """Read FASTA records as (first header token, concatenated sequence)."""
     source = Path(path)
     try:
-        lines = source.read_text(encoding="utf-8").splitlines()
+        lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
     except (OSError, UnicodeError) as exc:
         raise ProPlexError(f"cannot read FASTA file: {source}") from exc
 
@@ -134,8 +134,8 @@ def parse_fasta(path: str | Path) -> list[tuple[str, str]]:
         records.append((current_id, sequence))
 
     for line_number, raw_line in enumerate(lines, start=1):
-        line = raw_line.strip()
-        if not line:
+        line = raw_line.rstrip("\r\n")
+        if line == "":
             continue
         if line.startswith(">"):
             finish_record()
@@ -212,8 +212,8 @@ def _load_model(model_name: str) -> _ModelBundle:
         raise ProPlexError(f"could not initialize ESM-2 model {model_name}: {exc}") from exc
 
 
-def _normalize_sequence(sequence: str, accepted: frozenset[str]) -> str:
-    normalized = sequence.strip().upper()
+def _normalize_sequence(sequence: str, accepted: frozenset[str], *, trim: bool = True) -> str:
+    normalized = (sequence.strip() if trim else sequence).upper()
     if not normalized:
         raise ProPlexError("sequence must not be empty")
     invalid = sorted(set(normalized) - accepted)
@@ -221,6 +221,26 @@ def _normalize_sequence(sequence: str, accepted: frozenset[str]) -> str:
         symbols = ", ".join(repr(item) for item in invalid)
         raise ProPlexError(f"sequence contains unsupported residue symbol(s): {symbols}")
     return normalized
+
+
+def _top_amino_acid_candidates(
+    log_probs: Any, candidate_items: list[tuple[str, int]]
+) -> list[tuple[str, float]]:
+    """Select the best amino-acid token, breaking equal scores alphabetically."""
+    import torch
+
+    candidate_items = sorted(candidate_items, key=lambda item: item[0])
+    candidate_token_ids = [token_id for _, token_id in candidate_items]
+    candidate_ids = torch.tensor(candidate_token_ids, dtype=torch.long, device=log_probs.device)
+    candidate_log_probs = log_probs.index_select(-1, candidate_ids)
+    best_index = candidate_log_probs.argmax(dim=-1)
+    best_log_probs = candidate_log_probs.gather(-1, best_index.unsqueeze(-1)).squeeze(-1)
+    best_indexes = best_index.detach().cpu().tolist()
+    best_probabilities = best_log_probs.exp().detach().cpu().tolist()
+    return [
+        (candidate_items[index][0], float(probability))
+        for index, probability in zip(best_indexes, best_probabilities)
+    ]
 
 
 def _score_normalized(
@@ -241,9 +261,6 @@ def _score_normalized(
     log_probabilities: list[float] = []
     top_candidates: list[tuple[str, float]] = []
     candidate_items = sorted(bundle.residue_token_ids.items())
-    candidate_token_ids = torch.tensor(
-        [token_id for _, token_id in candidate_items], dtype=torch.long, device=bundle.device
-    )
     with warnings.catch_warnings(), torch.inference_mode():
         warnings.filterwarnings(
             "ignore",
@@ -296,22 +313,7 @@ def _score_normalized(
             log_probs = torch.log_softmax(logits[rows, positions].float(), dim=-1)
             selected = log_probs[rows, target_tensor].detach().cpu().tolist()
             log_probabilities.extend(float(value) for value in selected)
-            candidate_mask = torch.zeros(
-                log_probs.shape[-1], dtype=torch.bool, device=bundle.device
-            )
-            candidate_mask[candidate_token_ids] = True
-            eligible_candidate_log_probs = log_probs.masked_fill(~candidate_mask, -torch.inf)
-            best_candidate_token_ids = eligible_candidate_log_probs.argmax(dim=-1)
-            best_candidate_log_probs = log_probs[
-                torch.arange(len(batch), device=bundle.device), best_candidate_token_ids
-            ]
-            best_candidate_ids_cpu = best_candidate_token_ids.detach().cpu().tolist()
-            best_candidate_probs_cpu = best_candidate_log_probs.exp().detach().cpu().tolist()
-            residue_for_token_id = {token_id: residue for residue, token_id in candidate_items}
-            top_candidates.extend(
-                (residue_for_token_id[token_id], float(probability))
-                for token_id, probability in zip(best_candidate_ids_cpu, best_candidate_probs_cpu)
-            )
+            top_candidates.extend(_top_amino_acid_candidates(log_probs, candidate_items))
             completed = min(offset + len(batch), len(targets))
             LOGGER.info(
                 "Residue scoring progress: %s / %s residues",
@@ -367,13 +369,9 @@ def score_fasta(
 ) -> list[SequenceResult]:
     """Score each record in a FASTA file independently."""
     records = parse_fasta(path)
-    normalized_records = [
-        (record_id, _normalize_sequence(sequence, ESM2_RESIDUE_ALPHABET))
-        for record_id, sequence in records
-    ]
     bundle = _load_model(model_name)
     results = []
-    for record_id, sequence in normalized_records:
-        normalized = _normalize_sequence(sequence, bundle.accepted_residues)
+    for record_id, sequence in records:
+        normalized = _normalize_sequence(sequence, bundle.accepted_residues, trim=False)
         results.append(_score_normalized(normalized, bundle, model_name, record_id))
     return results

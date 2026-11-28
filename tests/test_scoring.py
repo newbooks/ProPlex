@@ -1,3 +1,4 @@
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from proplex.scoring import (
     DEFAULT_MODEL,
     _ModelBundle,
     _normalize_sequence,
+    _top_amino_acid_candidates,
     parse_fasta,
     plan_windows,
     score_fasta,
@@ -109,6 +111,13 @@ def test_score_sequence_produces_per_residue_and_aggregate(monkeypatch) -> None:
     assert result.psn == pytest.approx(1 / result.pseudo_perplexity)
 
 
+def test_top_candidate_ties_resolve_alphabetically_independent_of_token_ids() -> None:
+    log_probs = torch.log_softmax(torch.tensor([[0.0] * 10]), dim=-1)
+    candidates = _top_amino_acid_candidates(log_probs, [("B", 3), ("A", 7)])
+    assert candidates[0][0] == "A"
+    assert candidates[0][1] == pytest.approx(torch.exp(log_probs[0, 7]).item())
+
+
 def test_fasta_parser_multiline_records(tmp_path: Path) -> None:
     fasta = tmp_path / "records.fasta"
     fasta.write_text(">first description\nACD\nEF\n\n>second\nGH\n", encoding="utf-8")
@@ -125,8 +134,8 @@ def test_fasta_parser_rejects_missing_records_or_sequences(tmp_path: Path, conte
 
 def test_fasta_parser_preserves_sequence_whitespace_for_validation(tmp_path: Path) -> None:
     fasta = tmp_path / "spaced.fasta"
-    fasta.write_text(">record\nAC D\n", encoding="utf-8")
-    assert parse_fasta(fasta) == [("record", "AC D")]
+    fasta.write_text(">record\n AC D \t\n", encoding="utf-8")
+    assert parse_fasta(fasta) == [("record", " AC D \t")]
 
 
 def test_score_fasta_preserves_identifiers(monkeypatch, tmp_path: Path) -> None:
@@ -135,3 +144,26 @@ def test_score_fasta_preserves_identifiers(monkeypatch, tmp_path: Path) -> None:
     fasta.write_text(">first record\nACD\n>second\nEFG\n", encoding="utf-8")
     results = score_fasta(fasta)
     assert [result.sequence_id for result in results] == ["first", "second"]
+
+
+def test_fasta_uses_selected_tokenizer_alphabet(monkeypatch, tmp_path: Path) -> None:
+    bundle = fake_bundle()
+    token_ids = {**bundle.residue_token_ids, "J": 29}
+    bundle = replace(
+        bundle,
+        residue_token_ids=token_ids,
+        accepted_residues=frozenset(token_ids),
+    )
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _: bundle)
+    fasta = tmp_path / "extended.fasta"
+    fasta.write_text(">record\nAJ\n", encoding="utf-8")
+    results = score_fasta(fasta)
+    assert results[0].sequence == "AJ"
+
+
+def test_fasta_edge_whitespace_is_rejected(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _: fake_bundle())
+    fasta = tmp_path / "spaced.fasta"
+    fasta.write_text(">record\n AC \n", encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported residue"):
+        score_fasta(fasta)
