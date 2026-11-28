@@ -56,7 +56,10 @@ def _write_results(path: Path, results: list[SequenceResult]) -> None:
         temporary_path.replace(path)
     except (OSError, TypeError, ValueError) as exc:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise ProPlexError(f"could not write result JSON to {path}: {exc}") from exc
 
 

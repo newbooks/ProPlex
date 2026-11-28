@@ -391,6 +391,8 @@ def score_sequence(
 ) -> SequenceResult:
     """Score one amino-acid sequence with ESM-2 masked residue predictions."""
     normalized = _prepare_sequence(sequence, trim=True)
+    # The tokenizer defines rare/ambiguous residue support; load it before weights,
+    # then reject unsupported letters without initializing the model.
     tokenizer_bundle = _load_tokenizer(model_name)
     _normalize_sequence(normalized, tokenizer_bundle.accepted_residues)
     bundle = _load_model(model_name, tokenizer_bundle)

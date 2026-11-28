@@ -1,9 +1,10 @@
 import json
 
+import pytest
 from typer.testing import CliRunner
 
-from proplex.cli import app, render_residue_dots
-from proplex.scoring import ResidueScore, SequenceResult
+from proplex.cli import _write_results, app, render_residue_dots
+from proplex.scoring import ProPlexError, ResidueScore, SequenceResult
 
 runner = CliRunner()
 
@@ -71,6 +72,19 @@ def test_unexpected_model_setup_error_is_reported_without_traceback(monkeypatch,
     assert result.exit_code == 1
     assert "simulated model setup failure" in result.stderr
     assert "Traceback" not in result.output
+
+
+def test_json_temp_cleanup_failure_preserves_original_write_error(monkeypatch, tmp_path) -> None:
+    def fail_serialization(*args, **kwargs):
+        raise ValueError("simulated serialization failure")
+
+    def fail_unlink(*args, **kwargs):
+        raise OSError("simulated cleanup failure")
+
+    monkeypatch.setattr("proplex.cli.json.dump", fail_serialization)
+    monkeypatch.setattr("pathlib.Path.unlink", fail_unlink)
+    with pytest.raises(ProPlexError, match="simulated serialization failure"):
+        _write_results(tmp_path / "result.json", [_result()])
 
 
 def test_residue_dot_display_uses_ten_levels_and_percentages() -> None:
