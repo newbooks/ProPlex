@@ -10,6 +10,8 @@ from proplex.scoring import (
     DEFAULT_MODEL,
     _ModelBundle,
     _normalize_sequence,
+    _prepare_sequence,
+    _TokenizerBundle,
     _top_amino_acid_candidates,
     parse_fasta,
     plan_windows,
@@ -49,12 +51,22 @@ def fake_bundle() -> _ModelBundle:
     )
 
 
+def fake_tokenizer_bundle(bundle: _ModelBundle | None = None) -> _TokenizerBundle:
+    model_bundle = bundle or fake_bundle()
+    return _TokenizerBundle(
+        tokenizer=model_bundle.tokenizer,
+        accepted_residues=model_bundle.accepted_residues,
+        residue_token_ids=model_bundle.residue_token_ids,
+    )
+
+
 def test_sequence_normalization_and_alphabet() -> None:
     accepted = fake_bundle().accepted_residues
-    assert _normalize_sequence("  acdBXZUO  ", accepted) == "ACDBXZUO"
+    assert _prepare_sequence("  acdBXZUO  ", trim=True) == "ACDBXZUO"
     for invalid in ("", "AC D", "AC-", "AC*"):
         with pytest.raises(ValueError):
-            _normalize_sequence(invalid, accepted)
+            _prepare_sequence(invalid, trim=True)
+    assert _normalize_sequence("ACD", accepted) == "ACD"
 
 
 @pytest.mark.parametrize("sequence", ["", "AC D", "AC*"])
@@ -62,6 +74,7 @@ def test_invalid_sequence_is_rejected_before_model_loading(monkeypatch, sequence
     def fail_if_loaded(_model_name: str):
         raise AssertionError("model loading should not occur for invalid input")
 
+    monkeypatch.setattr("proplex.scoring._load_tokenizer", fail_if_loaded)
     monkeypatch.setattr("proplex.scoring._load_model", fail_if_loaded)
     with pytest.raises(ValueError):
         score_sequence(sequence)
@@ -87,7 +100,8 @@ def test_center_selection_tie_breaks_to_smaller_start() -> None:
 
 
 def test_score_sequence_produces_per_residue_and_aggregate(monkeypatch) -> None:
-    monkeypatch.setattr("proplex.scoring._load_model", lambda _: fake_bundle())
+    monkeypatch.setattr("proplex.scoring._load_tokenizer", lambda _: fake_tokenizer_bundle())
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _name, _tok: fake_bundle())
     result = score_sequence("acd", model_name=DEFAULT_MODEL)
 
     assert isinstance(result, SequenceResult)
@@ -139,7 +153,8 @@ def test_fasta_parser_preserves_sequence_whitespace_for_validation(tmp_path: Pat
 
 
 def test_score_fasta_preserves_identifiers(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("proplex.scoring._load_model", lambda _: fake_bundle())
+    monkeypatch.setattr("proplex.scoring._load_tokenizer", lambda _: fake_tokenizer_bundle())
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _name, _tok: fake_bundle())
     fasta = tmp_path / "records.fasta"
     fasta.write_text(">first record\nACD\n>second\nEFG\n", encoding="utf-8")
     results = score_fasta(fasta)
@@ -154,7 +169,9 @@ def test_fasta_uses_selected_tokenizer_alphabet(monkeypatch, tmp_path: Path) -> 
         residue_token_ids=token_ids,
         accepted_residues=frozenset(token_ids),
     )
-    monkeypatch.setattr("proplex.scoring._load_model", lambda _: bundle)
+    tokenizer_bundle = fake_tokenizer_bundle(bundle)
+    monkeypatch.setattr("proplex.scoring._load_tokenizer", lambda _: tokenizer_bundle)
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _name, _tok: bundle)
     fasta = tmp_path / "extended.fasta"
     fasta.write_text(">record\nAJ\n", encoding="utf-8")
     results = score_fasta(fasta)
@@ -162,8 +179,9 @@ def test_fasta_uses_selected_tokenizer_alphabet(monkeypatch, tmp_path: Path) -> 
 
 
 def test_fasta_edge_whitespace_is_rejected(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("proplex.scoring._load_model", lambda _: fake_bundle())
+    monkeypatch.setattr("proplex.scoring._load_tokenizer", lambda _: fake_tokenizer_bundle())
+    monkeypatch.setattr("proplex.scoring._load_model", lambda _name, _tok: fake_bundle())
     fasta = tmp_path / "spaced.fasta"
     fasta.write_text(">record\n AC \n", encoding="utf-8")
-    with pytest.raises(ValueError, match="unsupported residue"):
+    with pytest.raises(ValueError, match="invalid character"):
         score_fasta(fasta)

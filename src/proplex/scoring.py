@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL = "facebook/esm2_t30_150M_UR50D"
-ESM2_RESIDUE_ALPHABET = frozenset("ACDEFGHIKLMNPQRSTVWYBXZUO")
 WINDOW_LENGTH = 1021
 MINIMUM_OVERLAP = 100
 INFERENCE_BATCH_SIZE = 8
@@ -78,6 +77,13 @@ class _ModelBundle:
     tokenizer: Any
     model: Any
     device: Any
+    accepted_residues: frozenset[str]
+    residue_token_ids: dict[str, int]
+
+
+@dataclass(frozen=True)
+class _TokenizerBundle:
+    tokenizer: Any
     accepted_residues: frozenset[str]
     residue_token_ids: dict[str, int]
 
@@ -154,29 +160,25 @@ def parse_fasta(path: str | Path) -> list[tuple[str, str]]:
     return records
 
 
-def _load_model(model_name: str) -> _ModelBundle:
-    """Load ESM-2 on demand and derive its accepted single-residue alphabet."""
+def _load_tokenizer(model_name: str) -> _TokenizerBundle:
+    """Load the tokenizer and derive accepted residues from single-token vocabulary entries."""
     try:
         for logger_name in ("httpx", "httpcore"):
             logging.getLogger(logger_name).setLevel(logging.WARNING)
         for logger_name in ("huggingface_hub", "transformers"):
             logging.getLogger(logger_name).setLevel(logging.ERROR)
-        with _quiet_native_stderr():
-            import torch
-        from transformers import AutoModelForMaskedLM, AutoTokenizer
+        from transformers import AutoTokenizer
         from transformers.utils import logging as transformers_logging
 
         transformers_logging.disable_progress_bar()
-        LOGGER.info("Loading ESM-2 model %s", model_name)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=f"{_HF_AUTH_WARNING}.*")
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForMaskedLM.from_pretrained(model_name)
         residue_token_ids: dict[str, int] = {}
         special_ids = set(tokenizer.all_special_ids)
         unk_id = tokenizer.unk_token_id
         vocabulary = tokenizer.get_vocab()
-        for symbol in ESM2_RESIDUE_ALPHABET:
+        for symbol in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             token_id = vocabulary.get(symbol)
             if token_id is None or token_id in special_ids or token_id == unk_id:
                 continue
@@ -194,17 +196,39 @@ def _load_model(model_name: str) -> _ModelBundle:
             raise ProPlexError(
                 f"tokenizer for {model_name} lacks required residue or special tokens"
             )
+        return _TokenizerBundle(
+            tokenizer=tokenizer,
+            accepted_residues=frozenset(residue_token_ids),
+            residue_token_ids=residue_token_ids,
+        )
+    except ProPlexError:
+        raise
+    except Exception as exc:
+        raise ProPlexError(f"could not initialize tokenizer for {model_name}: {exc}") from exc
+
+
+def _load_model(model_name: str, tokenizer_bundle: _TokenizerBundle | None = None) -> _ModelBundle:
+    """Load ESM-2 weights after input has passed tokenizer-derived validation."""
+    try:
+        with _quiet_native_stderr():
+            import torch
+        from transformers import AutoModelForMaskedLM
+
+        if tokenizer_bundle is None:
+            tokenizer_bundle = _load_tokenizer(model_name)
+        LOGGER.info("Loading ESM-2 model %s", model_name)
+        model = AutoModelForMaskedLM.from_pretrained(model_name)
 
         device = torch.device("cuda" if _silence_cuda_probe_stderr() else "cpu")
         model.eval()
         model.to(device)
         LOGGER.info("ESM-2 model ready on %s", device)
         return _ModelBundle(
-            tokenizer=tokenizer,
+            tokenizer=tokenizer_bundle.tokenizer,
             model=model,
             device=device,
-            accepted_residues=frozenset(residue_token_ids),
-            residue_token_ids=residue_token_ids,
+            accepted_residues=tokenizer_bundle.accepted_residues,
+            residue_token_ids=tokenizer_bundle.residue_token_ids,
         )
     except ProPlexError:
         raise
@@ -212,15 +236,25 @@ def _load_model(model_name: str) -> _ModelBundle:
         raise ProPlexError(f"could not initialize ESM-2 model {model_name}: {exc}") from exc
 
 
-def _normalize_sequence(sequence: str, accepted: frozenset[str], *, trim: bool = True) -> str:
+def _prepare_sequence(sequence: str, *, trim: bool) -> str:
+    if not isinstance(sequence, str):
+        raise ProPlexError("sequence must be provided as text")
     normalized = (sequence.strip() if trim else sequence).upper()
     if not normalized:
         raise ProPlexError("sequence must not be empty")
-    invalid = sorted(set(normalized) - accepted)
+    invalid = sorted(set(normalized) - set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+    if invalid:
+        symbols = ", ".join(repr(item) for item in invalid)
+        raise ProPlexError(f"sequence contains invalid character(s): {symbols}")
+    return normalized
+
+
+def _normalize_sequence(sequence: str, accepted: frozenset[str]) -> str:
+    invalid = sorted(set(sequence) - accepted)
     if invalid:
         symbols = ", ".join(repr(item) for item in invalid)
         raise ProPlexError(f"sequence contains unsupported residue symbol(s): {symbols}")
-    return normalized
+    return sequence
 
 
 def _top_amino_acid_candidates(
@@ -356,9 +390,10 @@ def score_sequence(
     sequence_id: str | None = None,
 ) -> SequenceResult:
     """Score one amino-acid sequence with ESM-2 masked residue predictions."""
-    normalized = _normalize_sequence(sequence, ESM2_RESIDUE_ALPHABET)
-    bundle = _load_model(model_name)
-    normalized = _normalize_sequence(normalized, bundle.accepted_residues)
+    normalized = _prepare_sequence(sequence, trim=True)
+    tokenizer_bundle = _load_tokenizer(model_name)
+    _normalize_sequence(normalized, tokenizer_bundle.accepted_residues)
+    bundle = _load_model(model_name, tokenizer_bundle)
     return _score_normalized(normalized, bundle, model_name, sequence_id)
 
 
@@ -369,9 +404,14 @@ def score_fasta(
 ) -> list[SequenceResult]:
     """Score each record in a FASTA file independently."""
     records = parse_fasta(path)
-    bundle = _load_model(model_name)
-    results = []
-    for record_id, sequence in records:
-        normalized = _normalize_sequence(sequence, bundle.accepted_residues, trim=False)
-        results.append(_score_normalized(normalized, bundle, model_name, record_id))
-    return results
+    prepared_records = [
+        (record_id, _prepare_sequence(sequence, trim=False)) for record_id, sequence in records
+    ]
+    tokenizer_bundle = _load_tokenizer(model_name)
+    for _, sequence in prepared_records:
+        _normalize_sequence(sequence, tokenizer_bundle.accepted_residues)
+    bundle = _load_model(model_name, tokenizer_bundle)
+    return [
+        _score_normalized(sequence, bundle, model_name, record_id)
+        for record_id, sequence in prepared_records
+    ]
