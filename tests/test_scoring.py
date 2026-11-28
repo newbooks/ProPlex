@@ -30,6 +30,8 @@ class FakeModel:
         # entries remain zero, making full-vocabulary normalization testable.
         logits = torch.zeros((*input_ids.shape, 32), device=input_ids.device)
         logits[..., 4:24] = 2.0
+        # A non-residue vocabulary entry outranks every amino-acid candidate.
+        logits[..., 31] = 3.0
         return type("Output", (), {"logits": logits})()
 
 
@@ -82,7 +84,10 @@ def test_score_sequence_produces_per_residue_and_aggregate(monkeypatch) -> None:
     assert result.length == 3
     assert [score.position for score in result.residue_scores] == [1, 2, 3]
     assert [score.residue for score in result.residue_scores] == list("ACD")
-    expected_probability = torch.softmax(torch.tensor([2.0] * 20 + [0.0] * 12), dim=0)[4].item()
+    fake_logits = torch.tensor([0.0] * 32)
+    fake_logits[4:24] = 2.0
+    fake_logits[31] = 3.0
+    expected_probability = torch.softmax(fake_logits, dim=0)[4].item()
     assert [score.top_candidate for score in result.residue_scores] == ["A"] * 3
     assert all(
         score.top_candidate_probability == pytest.approx(expected_probability)

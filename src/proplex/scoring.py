@@ -292,16 +292,21 @@ def _score_normalized(
             log_probs = torch.log_softmax(logits[rows, positions].float(), dim=-1)
             selected = log_probs[rows, target_tensor].detach().cpu().tolist()
             log_probabilities.extend(float(value) for value in selected)
-            candidate_log_probs = log_probs.index_select(-1, candidate_token_ids)
-            best_candidate_indexes = candidate_log_probs.argmax(dim=-1)
-            best_candidate_log_probs = candidate_log_probs[
-                torch.arange(len(batch), device=bundle.device), best_candidate_indexes
+            candidate_mask = torch.zeros(
+                log_probs.shape[-1], dtype=torch.bool, device=bundle.device
+            )
+            candidate_mask[candidate_token_ids] = True
+            eligible_candidate_log_probs = log_probs.masked_fill(~candidate_mask, -torch.inf)
+            best_candidate_token_ids = eligible_candidate_log_probs.argmax(dim=-1)
+            best_candidate_log_probs = log_probs[
+                torch.arange(len(batch), device=bundle.device), best_candidate_token_ids
             ]
-            best_candidate_indexes_cpu = best_candidate_indexes.detach().cpu().tolist()
+            best_candidate_ids_cpu = best_candidate_token_ids.detach().cpu().tolist()
             best_candidate_probs_cpu = best_candidate_log_probs.exp().detach().cpu().tolist()
+            residue_for_token_id = {token_id: residue for residue, token_id in candidate_items}
             top_candidates.extend(
-                (candidate_items[index][0], float(probability))
-                for index, probability in zip(best_candidate_indexes_cpu, best_candidate_probs_cpu)
+                (residue_for_token_id[token_id], float(probability))
+                for token_id, probability in zip(best_candidate_ids_cpu, best_candidate_probs_cpu)
             )
             completed = min(offset + len(batch), len(targets))
             LOGGER.info(
