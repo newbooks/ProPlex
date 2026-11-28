@@ -136,17 +136,18 @@ sequence scoring calculation. Each FASTA record is scored independently.
 
 ## 7. CLI behavior, progress, and JSON output
 
-1. Keep the installed Typer command `proplex` and the public
-   `from proplex import score_sequence` API. The CLI must call the public
-   scoring function, not duplicate inference logic.
-2. `--seq` and `--fasta` invoke the scoring pipeline for their respective
+1. Keep the installed Typer root command `proplex`, implement scoring as
+   `proplex query`, and keep the public `from proplex import score_sequence`
+   API. The CLI must call the public scoring function, not duplicate inference
+   logic. Leave the root open for future commands such as `proplex root`.
+2. `proplex query --seq` and `proplex query --fasta` invoke the scoring pipeline for their respective
    inputs. Supplying both is an explicit usage error. Model/input/inference
    errors print a concise `[ERROR]:` message to stderr and exit nonzero; no
    routine traceback is printed.
 3. Log startup, model loading/readiness, residue progress, and result
    publication to the console using PClass's compact format:
    `[INFO]: message`. Progress messages report completed and total residues
-   after each inference batch. Do not require `--verbose` to see progress.
+   after each inference batch.
 4. Always write a JSON file containing all results, including every residue's
    position, observed symbol/probability/log-probability, and top candidate
    symbol/probability. The top-level JSON
@@ -167,9 +168,8 @@ sequence scoring calculation. Each FASTA record is scored independently.
    Use ten dot levels for the observed residue: `floor(probability * 10)` dots,
    capped at ten. A score below 10% displays zero dots; 100% displays ten.
    Exact values remain in JSON.
-7. Remove `--verbose` / `-v`; residue bars are always shown and complete
-   numerical scores are saved in JSON. Keep `--help`/`-h` and bare-command help
-   functional without loading model weights.
+7. Root and query `--help`/`-h` plus bare `proplex` and `proplex query` help
+   must work without loading model weights.
 
 ## 8. Testing and acceptance criteria
 
@@ -190,8 +190,9 @@ download model weights or require GPU/network access. Cover at least:
 5. Scoring: hand-computable fake logits, ordered residue outputs, `math.fsum`
    aggregation, PPPL/PSN reciprocal identity within floating-point tolerance,
    and no duplicate residue contributions from overlap.
-6. Public API and CLI: import without model loading; API result fields; `--seq`,
-   multi-record `--fasta`, JSON content/default/custom destinations, PClass-style
+6. Public API and CLI: import without model loading; API result fields;
+   `proplex query --seq`, multi-record `proplex query --fasta`, JSON
+   content/default/custom destinations, PClass-style
    progress messages, ten-level residue dot bars, candidate probabilities,
    mutually exclusive inputs, concise invalid-input/model-
    load/write errors, successful help and bare-command help without model

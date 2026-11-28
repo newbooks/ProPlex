@@ -247,7 +247,7 @@ Exact scoring requires one masked example per residue, even when batched. For fu
 ### Proposed command-line interface
 
 ```bash
-proplex query.fasta --model esm2_t30_150M_UR50D --output scores.tsv
+proplex query --fasta query.fasta --output scores.json
 ```
 
 Example output (illustrative):

@@ -19,7 +19,14 @@ LOGGER = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="proplex",
-    help="Assess protein sequence predictability with a protein language model.",
+    help="Protein sequence tools using protein language models.",
+    invoke_without_command=True,
+    add_completion=False,
+    context_settings={"help_option_names": ["--help", "-h"]},
+)
+query_app = typer.Typer(
+    name="query",
+    help="Score sequence predictability and residue probabilities.",
     invoke_without_command=True,
     add_completion=False,
     context_settings={"help_option_names": ["--help", "-h"]},
@@ -81,7 +88,15 @@ def render_residue_dots(result: SequenceResult) -> str:
 
 
 @app.callback()
-def main(
+def main(ctx: typer.Context) -> None:
+    """Protein sequence tools."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=0)
+
+
+@query_app.callback()
+def query(
     ctx: typer.Context,
     seq: Annotated[str | None, typer.Option("--seq", help="Protein sequence string.")] = None,
     fasta: Annotated[Path | None, typer.Option("--fasta", help="FASTA input file.")] = None,
@@ -127,3 +142,6 @@ def main(
         )
         typer.echo(render_residue_dots(result))
     LOGGER.info("Wrote %s result(s) to %s", len(results), result_path)
+
+
+app.add_typer(query_app, name="query")

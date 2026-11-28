@@ -25,8 +25,16 @@ def _result(sequence_id: str | None = None) -> SequenceResult:
     )
 
 
-def test_help_and_bare_command_do_not_load_model() -> None:
+def test_root_help_and_bare_command_show_query_command() -> None:
     for arguments in (["--help"], ["-h"], []):
+        result = runner.invoke(app, arguments)
+        assert result.exit_code == 0
+        assert "query" in result.stdout
+        assert "--seq" not in result.stdout
+
+
+def test_query_help_and_bare_query_show_query_options() -> None:
+    for arguments in (["query", "--help"], ["query", "-h"], ["query"]):
         result = runner.invoke(app, arguments)
         assert result.exit_code == 0
         assert "--seq" in result.stdout
@@ -38,7 +46,7 @@ def test_help_and_bare_command_do_not_load_model() -> None:
 def test_seq_option_writes_complete_json_and_summary(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("proplex.cli.score_sequence", lambda sequence: _result())
     output = tmp_path / "custom-results.json"
-    result = runner.invoke(app, ["--seq", "AC", "--output", str(output)])
+    result = runner.invoke(app, ["query", "--seq", "AC", "--output", str(output)])
     assert result.exit_code == 0
     assert "sequence\t2" in result.stdout
     payload = json.loads(output.read_text(encoding="utf-8"))
@@ -52,13 +60,13 @@ def test_fasta_output_defaults_next_to_input(monkeypatch, tmp_path) -> None:
     fasta = tmp_path / "proteins.fasta"
     fasta.write_text(">p1\nAC\n", encoding="utf-8")
     monkeypatch.setattr("proplex.cli.score_fasta", lambda path: [_result("p1")])
-    result = runner.invoke(app, ["--fasta", str(fasta)])
+    result = runner.invoke(app, ["query", "--fasta", str(fasta)])
     assert result.exit_code == 0
     assert (tmp_path / "proteins.proplex.json").is_file()
 
 
 def test_seq_and_fasta_are_mutually_exclusive() -> None:
-    result = runner.invoke(app, ["--seq", "AC", "--fasta", "input.fa"])
+    result = runner.invoke(app, ["query", "--seq", "AC", "--fasta", "input.fa"])
     assert result.exit_code == 2
     assert "mutually exclusive" in result.stderr
 
@@ -68,7 +76,7 @@ def test_unexpected_model_setup_error_is_reported_without_traceback(monkeypatch,
         raise RuntimeError("simulated model setup failure")
 
     monkeypatch.setattr("proplex.cli.score_sequence", fail_loading)
-    result = runner.invoke(app, ["--seq", "AC", "--output", str(tmp_path / "result.json")])
+    result = runner.invoke(app, ["query", "--seq", "AC", "--output", str(tmp_path / "result.json")])
     assert result.exit_code == 1
     assert "simulated model setup failure" in result.stderr
     assert "Traceback" not in result.output

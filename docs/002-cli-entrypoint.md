@@ -1,13 +1,13 @@
 # 002: Typer command and importable API entry point
 
-Status: implementation spec; initial CLI shell only.
+Status: implemented; later sequence-scoring behavior is specified in 003.
 Prerequisite: [001: ProPlex core scoring and CLI implementation](001-core-scoring.md).
 
 ## 1. Goal
 
-Provide a usable `proplex` command and an importable Python package/API. This
-step establishes the public entry points and help text. It does not implement
-sequence parsing, model loading, scoring, or residue-level visualization.
+Provide a Typer root command and an importable Python package/API. The `query`
+subcommand owns sequence scoring; the root remains available for future
+commands such as `root`.
 
 ## 2. Package and public entry points
 
@@ -18,8 +18,7 @@ sequence parsing, model loading, scoring, or residue-level visualization.
 3. Define and export a public `score_sequence` function from `proplex`, so users
    can call it directly as `from proplex import score_sequence`. Also make its
    implementation module importable. The function may be a documented stub in
-   this step; the scoring contract is defined in spec 001 and should be
-   implemented in a later step.
+   this step; the scoring implementation is defined in spec 003.
 4. Keep CLI wiring thin and call the same public library API that Python users
    will call once scoring is implemented. Do not put the scoring algorithm in
    the Typer command callback.
@@ -27,25 +26,18 @@ sequence parsing, model loading, scoring, or residue-level visualization.
 ## 3. Initial command behavior
 
 1. `proplex --help` and `proplex -h` display root help and exit successfully.
-2. Running `proplex` with no arguments displays the same help by default and
-   exits successfully. It must not try to load ESM-2, read input, or start
-   scoring.
-3. The root help describes ProPlex and lists the planned initial options:
+2. Running `proplex` with no arguments displays root help by default and exits
+   successfully. It must not try to load ESM-2, read input, or start scoring.
+3. The root help describes ProPlex and lists the `query` subcommand. Query help
+   describes the planned input/output options:
    - `--seq SEQUENCE`: sequence string input.
    - `--fasta PATH`: FASTA file input, potentially containing multiple records.
    - `--output PATH`, `-o`: JSON result destination; a default is selected
      based on the input when omitted.
-4. Register the options with useful help text, but leave their scoring and
-   output behavior as explicit placeholders. Invoking an input option must not
-   silently claim to have scored a sequence. If placeholder invocation is
-   handled, report clearly that the feature is not implemented and exit
-   nonzero.
-5. `--seq` and `--fasta` are mutually exclusive once input handling is
-   implemented. The option names and semantics should be established in the
-   CLI now; input validation is out of scope for this spec.
-6. Preserve Typer's normal help behavior at the root. No subcommands are
-   required yet; use a Typer root application that can accept sub-applications
-   later.
+4. `--seq` and `--fasta` are mutually exclusive. Scoring and JSON output are
+   implemented as specified in 003.
+5. Preserve help at both root and query levels. Bare `proplex` shows root
+   help; bare `proplex query` shows query help. Neither loads model assets.
 
 ## 4. Help content
 
@@ -53,30 +45,28 @@ Root help must communicate that ProPlex evaluates protein sequence
 predictability with a protein language model, and show:
 
 ```text
-proplex --seq SEQUENCE
-proplex --fasta PATH
-proplex --output results.json
+proplex query --seq SEQUENCE
+proplex query --fasta PATH
+proplex query --output results.json
 ```
 
-Explain that JSON output includes sequence-level and residue-level prediction
-results. Do not imply that scoring already works in this shell-only step.
-Typer may control exact help formatting.
+Query help explains the sequence inputs and JSON output. Root help lists
+subcommands and leaves room for future commands. Typer controls exact help
+formatting.
 
 ## 5. Out of scope
 
-1. ESM-2 model/tokenizer loading, dependency setup, and inference.
-2. Implementing `score_sequence`; it is a public API placeholder in this step.
-3. Sequence alphabet validation, FASTA parsing, and long-sequence windowing.
-4. PPPL/PSN calculations and final result formatting.
-5. Detailed residue graph design and rendering.
+Detailed scoring, input handling, and output semantics are specified in 003.
 
 ## 6. Acceptance checks
 
-1. `proplex --help` exits zero and displays the description and planned
+1. `proplex --help` exits zero and displays the root description and `query`
+   subcommand.
+2. `proplex -h` behaves equivalently; `proplex query --help` lists the
    `--seq`, `--fasta`, and `--output` options.
-2. `proplex -h` behaves equivalently.
-3. `proplex` with no arguments exits zero and displays root help without model
-   loading or inference.
+3. `proplex` with no arguments exits zero and displays root help; `proplex
+   query` with no arguments exits zero and displays query help. Neither loads
+   model weights or performs inference.
 4. `import proplex` succeeds, and `from proplex import score_sequence`
    resolves the documented public callable.
 5. Placeholder input invocation never reports a successful score.
