@@ -55,6 +55,16 @@ def test_sequence_normalization_and_alphabet() -> None:
             _normalize_sequence(invalid, accepted)
 
 
+@pytest.mark.parametrize("sequence", ["", "AC D", "AC*"])
+def test_invalid_sequence_is_rejected_before_model_loading(monkeypatch, sequence: str) -> None:
+    def fail_if_loaded(_model_name: str):
+        raise AssertionError("model loading should not occur for invalid input")
+
+    monkeypatch.setattr("proplex.scoring._load_model", fail_if_loaded)
+    with pytest.raises(ValueError):
+        score_sequence(sequence)
+
+
 @pytest.mark.parametrize("length", [1, 1021, 1022, 1942, 3000])
 def test_windows_cover_sequence_and_respect_policy(length: int) -> None:
     windows = plan_windows(length)

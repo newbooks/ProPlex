@@ -111,6 +111,9 @@ def main(
     except ProPlexError as exc:
         LOGGER.error("%s", exc)
         raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        LOGGER.error("Scoring failed: %s", exc)
+        raise typer.Exit(code=1) from exc
 
     typer.echo("sequence_id\tlength\tmean_log_probability\tpseudo_perplexity\tpsn")
     for result in results:

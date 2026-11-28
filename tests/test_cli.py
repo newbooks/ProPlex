@@ -62,6 +62,17 @@ def test_seq_and_fasta_are_mutually_exclusive() -> None:
     assert "mutually exclusive" in result.stderr
 
 
+def test_unexpected_model_setup_error_is_reported_without_traceback(monkeypatch, tmp_path) -> None:
+    def fail_loading(sequence: str):
+        raise RuntimeError("simulated model setup failure")
+
+    monkeypatch.setattr("proplex.cli.score_sequence", fail_loading)
+    result = runner.invoke(app, ["--seq", "AC", "--output", str(tmp_path / "result.json")])
+    assert result.exit_code == 1
+    assert "simulated model setup failure" in result.stderr
+    assert "Traceback" not in result.output
+
+
 def test_residue_dot_display_uses_ten_levels_and_percentages() -> None:
     result = SequenceResult(
         sequence="ACDE",
