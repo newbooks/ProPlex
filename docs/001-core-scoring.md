@@ -32,9 +32,9 @@ specified here in production-quality code and tests.
    `PSN = exp(mean_log_probability) = 1/PPPL`.
 5. Exclude special and padding tokens from the set of scored residues. Special
    tokens remain in the model input and the model's vocabulary normalization.
-6. Report PPPL and PSN for each sequence. Preserve the mean log probability as
-   useful output metadata. Verbose mode also reports per-residue probabilities
-   using a text graph; graph design is intentionally deferred.
+6. Report PPPL and PSN for each sequence. Preserve the mean log probability and
+   all residue-level probabilities/log-probabilities in the result JSON. The
+   CLI always writes this complete JSON; there is no verbose display option.
 
 ## 3. Input sequence policy
 
@@ -97,17 +97,16 @@ interface decisions are:
 2. `proplex --fasta PATH` scores sequence record(s) from a FASTA file.
 3. `proplex --help` and `proplex -h` show help. Invoking `proplex` with no
    arguments also shows help by default.
-4. `proplex --verbose` and `proplex -v` include residue-level probabilities
-   using a text graph. The graph's appearance and scale are not decided yet;
-   leave the detailed graph design for a later decision.
+4. The CLI always saves complete sequence and residue-level results to JSON.
+   `--output` / `-o` selects the path; otherwise FASTA writes beside the input
+   as `<stem>.proplex.json` and `--seq` writes `proplex-results.json` in the
+   current directory.
 5. Treat `--seq` and `--fasta` as mutually exclusive input modes.
 
 ## 7. Decisions still open
 
-1. Define the verbose residue-probability text graph.
-2. Define final result formatting and output-file support, if needed.
-3. Decide whether CPU/GPU selection needs a user-facing option; no such option
+1. Decide whether CPU/GPU selection needs a user-facing option; no such option
    is currently specified.
-4. Pin or otherwise define model/tokenizer revisions if reproducible scoring
+2. Pin or otherwise define model/tokenizer revisions if reproducible scoring
    across model updates is required.
 

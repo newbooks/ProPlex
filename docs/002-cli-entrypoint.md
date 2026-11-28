@@ -33,12 +33,13 @@ sequence parsing, model loading, scoring, or residue-level visualization.
 3. The root help describes ProPlex and lists the planned initial options:
    - `--seq SEQUENCE`: sequence string input.
    - `--fasta PATH`: FASTA file input, potentially containing multiple records.
-   - `--verbose`, `-v`: request residue-level probabilities and a text graph.
+   - `--output PATH`, `-o`: JSON result destination; a default is selected
+     based on the input when omitted.
 4. Register the options with useful help text, but leave their scoring and
-   output behavior as explicit placeholders. Invoking an input or verbose
-   option must not silently claim to have scored a sequence. If placeholder
-   invocation is handled, report clearly that the feature is not implemented
-   and exit nonzero.
+   output behavior as explicit placeholders. Invoking an input option must not
+   silently claim to have scored a sequence. If placeholder invocation is
+   handled, report clearly that the feature is not implemented and exit
+   nonzero.
 5. `--seq` and `--fasta` are mutually exclusive once input handling is
    implemented. The option names and semantics should be established in the
    CLI now; input validation is out of scope for this spec.
@@ -54,12 +55,12 @@ predictability with a protein language model, and show:
 ```text
 proplex --seq SEQUENCE
 proplex --fasta PATH
-proplex --verbose
+proplex --output results.json
 ```
 
-Explain that verbose output is intended to include residue-level prediction
-probabilities and a text graph. Do not imply that scoring or graph rendering
-already works in this shell-only step. Typer may control exact formatting.
+Explain that JSON output includes sequence-level and residue-level prediction
+results. Do not imply that scoring already works in this shell-only step.
+Typer may control exact help formatting.
 
 ## 5. Out of scope
 
@@ -72,7 +73,7 @@ already works in this shell-only step. Typer may control exact formatting.
 ## 6. Acceptance checks
 
 1. `proplex --help` exits zero and displays the description and planned
-   `--seq`, `--fasta`, and `--verbose` options.
+   `--seq`, `--fasta`, and `--output` options.
 2. `proplex -h` behaves equivalently.
 3. `proplex` with no arguments exits zero and displays root help without model
    loading or inference.
